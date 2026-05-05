@@ -2,7 +2,7 @@
 
 AI 영상 크리에이터를 위한 **레퍼런스 자동 수집 도구**.
 
-키워드를 던지면 [filmvibes.io](https://filmvibes.io)에서 영화·드라마 스틸 5장을 모아 로컬 HTML 갤러리로 보여줍니다. 한 컷 레퍼런스 찾는 데 30분 → 5분.
+키워드를 던지면 [Pexels](https://www.pexels.com)(+선택 Pixabay)에서 광고·시네마틱 톤 사진 5장을 모아 로컬 HTML 갤러리로 보여줍니다. 한 컷 레퍼런스 찾는 데 30분 → 5분.
 
 > 🧽 OS 청사진의 첫 부품 — "나는 의도와 최종 디렉팅만 하고, 나머지는 시스템이 한다"
 
@@ -100,13 +100,22 @@ ref --project ad-X "moody close-up"
 
 ---
 
-## Pinterest는 왜 빠져있나요?
+## API 키 발급 (무료, 5분)
 
-Pinterest API는 2025년부터 "Standard Access" 승인을 받은 비즈니스 앱만 검색을 허용합니다. 일반 토큰은 401 에러로 차단됩니다. 이 도구는 401을 만나면 조용히 건너뛰고 filmvibes만 사용합니다.
+### Pexels (필수) — 영상 크리에이터에게 가장 보편적
+1. https://www.pexels.com/api/ 접속
+2. "Get Started" 또는 "Your API Key" → 가입 (이메일·비밀번호 또는 Google)
+3. 발급받은 API key를 `.env`의 `PEXELS_API_KEY=` 뒤에 붙여넣기
 
-해결 옵션:
-1. Pinterest Standard Access 신청 (며칠~몇 주, 사용 사례 설명 필요)
-2. v0.2에서 다른 무료 출처(Behance, Vimeo, Are.na) 추가 (가장 현실적)
+### Pixabay (선택) — 더 다양한 출처 추가
+1. https://pixabay.com/api/docs/ 접속
+2. 가입 후 "Your API key" 확인
+3. `.env`의 `PIXABAY_API_KEY=` 뒤에 붙여넣기
+
+### 왜 filmvibes·Pinterest가 빠져있나요?
+- **Pinterest**: Standard Access 미승인 앱은 검색 API 401 차단 (2025 정책)
+- **filmvibes.io**: 무로그인 검색이 차단되어 Google OAuth 흐름이 필요. 작업량 대비 안정성 낮음
+- 둘 다 v0.2에서 별도 부품으로 추적 가능
 
 ---
 

@@ -1,6 +1,6 @@
 ---
 name: ref-finder
-description: AI 영상 크리에이터를 위한 레퍼런스 자동 수집 스킬. 사용자가 키워드·의뢰서·스토리보드를 말하면 filmvibes.io에서 영화·드라마 스틸 5장을 모아 로컬 HTML 갤러리로 출력. 트리거 키워드 — "레퍼런스 찾아줘", "광고 컨셉용 자료", "무드보드 만들어줘", "영상 레퍼런스", "비주얼 자료", "스틸 모아줘", "moodboard", "reference". 영상·이미지 제작 전에 시각 레퍼런스가 필요할 때 발동.
+description: AI 영상 크리에이터를 위한 레퍼런스 자동 수집 스킬. 사용자가 키워드·의뢰서·스토리보드를 말하면 Pexels(+선택 Pixabay)에서 광고·시네마틱 톤 사진 5장을 모아 로컬 HTML 갤러리로 출력. 트리거 키워드 — "레퍼런스 찾아줘", "광고 컨셉용 자료", "무드보드 만들어줘", "영상 레퍼런스", "비주얼 자료", "스틸 모아줘", "moodboard", "reference". 영상·이미지 제작 전에 시각 레퍼런스가 필요할 때 발동.
 ---
 
 # ref-finder Skill
@@ -77,10 +77,12 @@ powershell -ExecutionPolicy Bypass -File "$HOME\.claude\skills\ref-finder\ref.ps
 
 ## 주의사항
 
-- **Pinterest는 401로 차단됨** (Pinterest API 정책 변경). 이 스킬은 filmvibes.io만 사용.
+- **Pexels API 키 필요** — 무료 가입(https://www.pexels.com/api/) 후 `.env`에 `PEXELS_API_KEY=` 채우기.
+- **Pinterest는 정책상 차단됨** (Standard Access 미승인 앱은 401). 사용 안 함.
+- **filmvibes.io는 무로그인 검색 차단** — Google OAuth가 필요해서 v0.1.1에서는 제외.
 - **한국어 검색은 약함**. 항상 영어로 변환 후 실행.
 - **결과가 없을 때** = 키워드가 너무 구체적. 단어 1~2개 줄이고 재시도.
-- **Mac/Linux는 미지원** (현재 v0.1, install.ps1만 제공). Windows 전용.
+- **Mac/Linux는 install.ps1 미지원** — `pip install mcp httpx python-dotenv` 수동 실행 후 사용 가능.
 
 ## 관련 부품 (다음 인터뷰 주제)
 

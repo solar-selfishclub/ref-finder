@@ -43,9 +43,9 @@ if ($needsPython) {
 }
 
 # ----------- 2. pip 패키지 -----------
-Write-Step "2/4 Python 패키지 설치 (mcp, httpx, beautifulsoup4, python-dotenv)"
+Write-Step "2/4 Python 패키지 설치 (mcp, httpx, python-dotenv)"
 & py -m pip install --quiet --upgrade pip
-& py -m pip install --quiet mcp httpx beautifulsoup4 python-dotenv
+& py -m pip install --quiet mcp httpx python-dotenv
 Write-Host "  패키지 설치 완료." -ForegroundColor Green
 
 # ----------- 3. .env -----------
@@ -57,8 +57,13 @@ if (-not (Test-Path $envPath)) {
     if (Test-Path $exPath) {
         Copy-Item $exPath $envPath
         Write-Host "  .env 파일을 만들었습니다." -ForegroundColor Green
-        Write-Host "  ※ Pinterest 토큰을 쓰려면 메모장으로 .env 열고 PINTEREST_ACCESS_TOKEN= 뒤에 붙여넣으세요." -ForegroundColor Yellow
-        Write-Host "    (Pinterest 없이 filmvibes만 써도 동작합니다.)" -ForegroundColor Yellow
+        Write-Host ""
+        Write-Host "  >>> 다음 단계: Pexels API 키를 .env에 넣어야 작동합니다 <<<" -ForegroundColor Yellow
+        Write-Host "    1. https://www.pexels.com/api/ 에서 무료 가입 (3분)" -ForegroundColor Yellow
+        Write-Host "    2. 발급받은 API key 복사" -ForegroundColor Yellow
+        Write-Host "    3. 메모장으로 .env 열고 PEXELS_API_KEY= 뒤에 붙여넣고 저장" -ForegroundColor Yellow
+        Write-Host ""
+        Write-Host "    .env 파일 위치: $envPath" -ForegroundColor Cyan
     } else {
         Write-Warning "  .env.example을 찾을 수 없음. 건너뜀."
     }

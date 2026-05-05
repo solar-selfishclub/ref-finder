@@ -1,15 +1,16 @@
 """
-ref-finder MCP server (v0.1 skeleton)
+ref-finder MCP server (v0.1.1)
 
-Pinterest + filmvibes.io 어댑터를 같은 인터페이스로 노출.
-Claude Code가 /find-ref 커맨드로 호출.
+Pexels API + (선택) Pixabay API로 안정적인 레퍼런스 수집.
+Claude Code가 /find-ref 커맨드 또는 자연어로 호출.
 
 설치 의존성:
-    pip install mcp httpx beautifulsoup4 python-dotenv
+    pip install mcp httpx python-dotenv
 
 환경 변수 (.env):
-    PINTEREST_ACCESS_TOKEN
-    REFS_OUTPUT_DIR  (기본: ~/refs)
+    PEXELS_API_KEY      (필수, https://www.pexels.com/api/ 에서 무료 발급)
+    PIXABAY_API_KEY     (선택, https://pixabay.com/api/docs/ 에서 무료 발급)
+    REFS_OUTPUT_DIR     (선택, 기본: ~/refs)
 """
 from __future__ import annotations
 
@@ -17,20 +18,20 @@ import json
 import os
 import re
 import sys
-from dataclasses import dataclass, asdict
+from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
 from typing import Iterable
 
 import httpx
-from bs4 import BeautifulSoup
 from dotenv import load_dotenv
 from mcp.server.fastmcp import FastMCP
 
-load_dotenv()
+load_dotenv(Path(__file__).parent.parent / ".env")
 
 REFS_DIR = Path(os.getenv("REFS_OUTPUT_DIR", str(Path.home() / "refs"))).expanduser()
-PINTEREST_TOKEN = os.getenv("PINTEREST_ACCESS_TOKEN", "")
+PEXELS_KEY = os.getenv("PEXELS_API_KEY", "").strip()
+PIXABAY_KEY = os.getenv("PIXABAY_API_KEY", "").strip()
 
 mcp = FastMCP("ref-finder")
 
@@ -39,7 +40,7 @@ mcp = FastMCP("ref-finder")
 
 @dataclass
 class RefItem:
-    source: str            # "pinterest" | "filmvibes"
+    source: str            # "pexels" | "pixabay"
     image_url: str         # 다운로드 대상
     page_url: str          # 원본 페이지 (출처 링크)
     title: str
@@ -48,104 +49,88 @@ class RefItem:
 
 # ---------- Adapters ----------
 
-class PinterestAdapter:
-    """Pinterest API v5. 무료 토큰으로 검색·핀 메타 가능."""
-    BASE = "https://api.pinterest.com/v5"
+class PexelsAdapter:
+    """Pexels API: 사진 검색. 무료 키, 헤더 한 줄 인증.
+    https://www.pexels.com/api/documentation/
+    """
+    BASE = "https://api.pexels.com/v1"
 
-    def __init__(self, token: str):
-        self.token = token
+    def __init__(self, key: str):
+        self.key = key
 
     def search(self, query: str, limit: int = 5) -> list[RefItem]:
-        if not self.token:
+        if not self.key:
             return []
-        # Pinterest v5는 Standard Access 승인 앱만 검색 호출 가능.
-        # 401(consumer type not supported) 등 권한 오류 시 조용히 빈 리스트.
-        headers = {"Authorization": f"Bearer {self.token}"}
-        params = {"query": query, "page_size": limit}
+        headers = {"Authorization": self.key}
+        params = {"query": query, "per_page": str(limit), "orientation": "landscape"}
         try:
-            with httpx.Client(timeout=10.0) as client:
-                r = client.get(f"{self.BASE}/pins/search", params=params, headers=headers)
+            with httpx.Client(timeout=15.0) as client:
+                r = client.get(f"{self.BASE}/search", params=params, headers=headers)
                 if r.status_code != 200:
-                    print(f"[pinterest] skipped ({r.status_code}): {r.text[:160]}", file=sys.stderr)
+                    print(f"[pexels] skipped ({r.status_code}): {r.text[:160]}", file=sys.stderr)
                     return []
                 data = r.json()
         except httpx.HTTPError as e:
-            print(f"[pinterest] error: {e}", file=sys.stderr)
+            print(f"[pexels] error: {e}", file=sys.stderr)
             return []
         items = []
-        for pin in data.get("items", [])[:limit]:
-            media = (pin.get("media") or {}).get("images", {}).get("originals") or {}
+        for photo in data.get("photos", [])[:limit]:
+            src = photo.get("src") or {}
+            image_url = src.get("large2x") or src.get("large") or src.get("original", "")
+            if not image_url:
+                continue
             items.append(RefItem(
-                source="pinterest",
-                image_url=media.get("url", ""),
-                page_url=f"https://www.pinterest.com/pin/{pin.get('id')}/",
-                title=pin.get("title", "") or pin.get("description", "")[:80],
+                source="pexels",
+                image_url=image_url,
+                page_url=photo.get("url", ""),
+                title=(photo.get("alt") or photo.get("photographer", ""))[:80],
                 tags=[],
             ))
-        return [it for it in items if it.image_url]
+        return items
 
 
-class FilmVibesAdapter:
-    """filmvibes.io: 검색 페이지(`/?query=...`)에서 결과 카드 추출.
-
-    검색 결과 마크업: <a href="/video?...&hhash=..."><img src="./init-page-content/..."></a>
-    robots.txt: /video/, /still/ 등은 차단되지만 루트 검색 페이지는 허용.
+class PixabayAdapter:
+    """Pixabay API: 사진 검색. 무료 키, query string 인증.
+    https://pixabay.com/api/docs/
     """
-    BASE = "https://filmvibes.io"
+    BASE = "https://pixabay.com/api/"
+
+    def __init__(self, key: str):
+        self.key = key
 
     def search(self, query: str, limit: int = 5) -> list[RefItem]:
-        try:
-            with httpx.Client(timeout=15.0, follow_redirects=True,
-                              headers={"User-Agent": "Mozilla/5.0 (ref-finder/0.1)"}) as client:
-                r = client.get(f"{self.BASE}/", params={"query": query})
-                r.raise_for_status()
-        except httpx.HTTPError:
+        if not self.key:
             return []
-
-        soup = BeautifulSoup(r.text, "html.parser")
-        items: list[RefItem] = []
-        seen: set[str] = set()
-
-        # 결과 = <a class="reference-video-wrapper" href="/video?..."><video poster="./init-page-content/..."></video></a>
-        for a in soup.select("a.reference-video-wrapper, a"):
-            href = (a.get("href") or "").strip()
-            if "/video?" not in href and "/video/" not in href:
+        params = {
+            "key": self.key,
+            "q": query,
+            "per_page": str(max(3, limit)),  # Pixabay 최소 3
+            "image_type": "photo",
+            "orientation": "horizontal",
+            "safesearch": "true",
+        }
+        try:
+            with httpx.Client(timeout=15.0) as client:
+                r = client.get(self.BASE, params=params)
+                if r.status_code != 200:
+                    print(f"[pixabay] skipped ({r.status_code}): {r.text[:160]}", file=sys.stderr)
+                    return []
+                data = r.json()
+        except httpx.HTTPError as e:
+            print(f"[pixabay] error: {e}", file=sys.stderr)
+            return []
+        items = []
+        for hit in data.get("hits", [])[:limit]:
+            image_url = hit.get("largeImageURL") or hit.get("webformatURL", "")
+            if not image_url:
                 continue
-            video = a.find("video")
-            poster = ""
-            if video is not None:
-                poster = (video.get("poster") or "").strip()
-            if not poster:
-                # 일부는 img 태그를 쓸 수도 있음
-                img = a.find("img")
-                if img:
-                    poster = (img.get("data-src") or img.get("src") or "").strip()
-            if not poster:
-                continue
-
-            # 상대 경로(./init-page-content/...) → 절대 URL
-            if poster.startswith("./"):
-                poster = self.BASE + poster[1:]
-            elif poster.startswith("/"):
-                poster = self.BASE + poster
-
-            if poster in seen:
-                continue
-            seen.add(poster)
-
-            page_url = href
-            if page_url.startswith("/"):
-                page_url = self.BASE + page_url
-
             items.append(RefItem(
-                source="filmvibes",
-                image_url=poster,
-                page_url=page_url,
-                title=query[:60],
-                tags=[],
+                source="pixabay",
+                image_url=image_url,
+                page_url=hit.get("pageURL", ""),
+                title=(hit.get("tags") or "pixabay")[:80],
+                tags=[t.strip() for t in (hit.get("tags") or "").split(",") if t.strip()],
             ))
-            if len(items) >= limit:
-                break
         return items
 
 
@@ -222,13 +207,13 @@ def find_references(
     limit: int = 5,
 ) -> dict:
     """
-    의도/기획 쿼리로 Pinterest + filmvibes.io에서 레퍼런스 후보 수집.
+    의도/기획 쿼리로 Pexels + Pixabay에서 레퍼런스 후보 수집.
     로컬 폴더에 이미지 다운로드 + index.html 생성 + meta.json 기록.
 
     Args:
-        query: 자유 텍스트 (키워드 / 의뢰서 / 스토리보드)
+        query: 자유 텍스트 (영문 키워드가 가장 결과 좋음)
         project: 프로젝트 폴더 이름 (기본 default)
-        limit: 출처별 후보 수 (기본 5)
+        limit: 총 결과 수 상한 (기본 5)
 
     Returns:
         {"folder": str, "html": str, "count": int, "items": [...]}
@@ -236,14 +221,15 @@ def find_references(
     timestamp = datetime.now().strftime("%Y%m%d-%H%M")
     out_dir = REFS_DIR / project / timestamp
 
-    pinterest = PinterestAdapter(PINTEREST_TOKEN)
-    filmvibes = FilmVibesAdapter()
+    pexels = PexelsAdapter(PEXELS_KEY)
+    pixabay = PixabayAdapter(PIXABAY_KEY)
 
+    # 각 출처에서 limit만큼 받아와서 인터리브 → 최종 limit개로 잘라냄
+    per_source = max(2, limit)
     pool: list[RefItem] = []
-    pool.extend(pinterest.search(query, limit=limit))
-    pool.extend(filmvibes.search(query, limit=limit))
+    pool.extend(pexels.search(query, limit=per_source))
+    pool.extend(pixabay.search(query, limit=per_source))
 
-    # 출처 균형: 한 출처가 모두 차지하지 않도록 인터리브
     by_source: dict[str, list[RefItem]] = {}
     for it in pool:
         by_source.setdefault(it.source, []).append(it)
