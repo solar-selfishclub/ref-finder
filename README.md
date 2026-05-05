@@ -8,61 +8,67 @@ AI 영상 크리에이터를 위한 **레퍼런스 자동 수집 도구**.
 
 ---
 
-## 새 컴퓨터에서 시작하기 (Windows)
+## 🚀 가장 쉬운 사용법 — Claude Code에서 자연어로
 
-### 1단계 — 이 저장소 받기
+### 한 번만: 새 컴퓨터/계정에 스킬 설치
 
-PowerShell을 열고 (시작 버튼 → "PowerShell" 검색):
+Claude Code를 열고 다음과 같이 말하세요:
+
+> **"https://github.com/solar-selfishclub/ref-finder 이거 스킬로 깔아줘"**
+
+Claude가 자동으로:
+1. `~/.claude/skills/ref-finder/`로 git clone
+2. (Windows) install.ps1 실행 → Python 자동 설치 + 패키지 설치
+3. 끝
+
+> Claude가 헤매면 더 명확하게: *"이 GitHub 레포를 ~/.claude/skills/ref-finder/ 로 git clone하고 install.ps1을 PowerShell로 실행해줘"*
+
+### 그 다음부터: 자연어로 호출
+
+어느 Claude Code 세션에서든:
+
+> **"30대 여성 자연주의 화장품 미니멀 톤으로 광고 레퍼런스 찾아줘"**
+> **"어두운 시네마틱한 클로즈업 제품샷 모아줘"**
+> **"방금 거 말고 더 밝은 톤으로 다시 (프로젝트 이름: ad-spring)"**
+
+Claude가 알아서 영문 키워드로 변환 → 실행 → 갤러리를 브라우저에서 열어줍니다.
+
+---
+
+## 직접 PowerShell로 쓰는 방법 (Claude 없이)
+
+### 새 컴퓨터에서 시작 (Windows)
+
+PowerShell을 열고:
 
 ```powershell
 cd $HOME
 git clone https://github.com/solar-selfishclub/ref-finder.git
 cd ref-finder
+.\ref.ps1 "natural cosmetic minimal"
 ```
 
-> **git이 없다고 뜨면**: https://git-scm.com/download/win 에서 다운로드 → 다음만 누르며 설치 → PowerShell 다시 열고 위 명령 재실행.
+`ref.ps1`이 첫 실행 시 자동으로 Python·패키지·환경파일을 셋업합니다. 그 다음부터는 바로 검색 실행.
 
-### 2단계 — 한 줄로 자동 설치
-
-```powershell
-.\install.ps1
-```
-
-이 한 줄이 자동으로 처리합니다:
-- Python 설치 (없으면)
-- 필요한 패키지 설치
-- `.env` 환경 파일 생성
-- `~/refs` 출력 폴더 생성
-
-> 처음에 "이 스크립트는 신뢰할 수 없습니다" 에러가 뜨면 다음 한 번만 실행:
-> ```powershell
-> Set-ExecutionPolicy -Scope CurrentUser RemoteSigned
-> ```
-
-### 3단계 — 사용 시작
-
-```powershell
-py find_ref.py --open "natural cosmetic minimal"
-```
-
-→ 5장 다운로드 + 자동으로 브라우저에서 갤러리 열림. 끝.
+> **git이 없으면**: https://git-scm.com/download/win 에서 설치.
+> **"스크립트 신뢰할 수 없음" 에러**: 한 번만 `Set-ExecutionPolicy -Scope CurrentUser RemoteSigned` 실행.
 
 ---
 
-## 자주 쓰는 명령어 모음
+## 자주 쓰는 명령어 모음 (PowerShell 직접 사용)
 
 ```powershell
-# 가장 기본 — 5장 받고 갤러리 자동 열기
-py find_ref.py --open "moody product close-up"
+# 가장 기본 — 5장 받고 갤러리 자동 열기 (ref.ps1 권장)
+.\ref.ps1 "moody product close-up"
 
 # 프로젝트별 폴더로 분리
-py find_ref.py --open --project ad-cosmetic-spring "natural minimal cosmetic"
+.\ref.ps1 --project ad-cosmetic-spring "natural minimal cosmetic"
 
 # 더 많이 받기 (5장이 부족할 때만)
-py find_ref.py --open --limit 10 "cinematic dark night street"
+.\ref.ps1 --limit 10 "cinematic dark night street"
 
-# 갤러리 자동으로 안 열기 (그냥 다운로드만)
-py find_ref.py "minimal cosmetic"
+# find_ref.py 직접 호출 (자동 설치 점검 없음)
+py find_ref.py --open "minimal cosmetic"
 ```
 
 결과는 `~/refs/<프로젝트명>/<날짜시간>/`에 저장됩니다. `index.html`을 더블클릭해서 언제든 다시 열 수 있어요.
