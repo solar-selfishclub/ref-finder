@@ -18,8 +18,8 @@ import ref_finder
 def main():
     p = argparse.ArgumentParser(description="ref-finder: 의도/기획 → 레퍼런스 갤러리")
     p.add_argument("query", nargs="?", default="", help="자유 텍스트 키워드 (Pexels/Pixabay)")
-    p.add_argument("--titles", default="",
-                   help='콤마로 구분한 영화·드라마 제목 (TMDB). 예: "Parasite,Minari,The Farewell"')
+    p.add_argument("--tags", default="",
+                   help='콤마로 구분한 시각 태그 (shot.cafe). 예: "rain,night,umbrella,street"')
     p.add_argument("--project", default="default", help="프로젝트 폴더 이름 (기본: default)")
     p.add_argument("--limit", type=int, default=5, help="후보 수 (기본: 5)")
     p.add_argument("--open", action="store_true", help="생성 후 갤러리 자동으로 브라우저에서 열기")
@@ -54,15 +54,15 @@ def main():
         return
 
     # ---- 수집 모드 ----
-    if not args.query and not args.titles:
-        p.error("query 또는 --titles 중 하나는 반드시 필요합니다 (또는 --curate 모드 사용).")
+    if not args.query and not args.tags:
+        p.error("query 또는 --tags 중 하나는 반드시 필요합니다 (또는 --curate 모드 사용).")
 
     fn = getattr(ref_finder.find_references, "fn", ref_finder.find_references)
-    if args.titles:
-        print(f"[tmdb] titles: {args.titles}")
+    if args.tags:
+        print(f"[shotcafe] tags: {args.tags}")
     if args.query:
-        print(f"[search] {args.query!r}")
-    result = fn(query=args.query, project=args.project, limit=args.limit, titles=args.titles)
+        print(f"[stock] {args.query!r}")
+    result = fn(query=args.query, project=args.project, limit=args.limit, tags=args.tags)
 
     print(f"\n[done] {result['count']}장 수집 완료")
     print(f"  folder : {result['folder']}")

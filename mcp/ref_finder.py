@@ -1,15 +1,15 @@
 """
-ref-finder MCP server (v0.1.1)
+ref-finder MCP server (v0.2.0)
 
-Pexels API + (선택) Pixabay API로 안정적인 레퍼런스 수집.
-Claude Code가 /find-ref 커맨드 또는 자연어로 호출.
+shot.cafe (영화·광고 스틸 + 태그) + Pexels (stock) 기반 레퍼런스 수집.
+사용자 자연어 → Claude가 태그 추출 → shot.cafe에서 씬 단위 검색 → AI 검수 → 갤러리.
 
 설치 의존성:
-    pip install mcp httpx python-dotenv
+    pip install mcp httpx beautifulsoup4 python-dotenv
 
 환경 변수 (.env):
-    PEXELS_API_KEY      (필수, https://www.pexels.com/api/ 에서 무료 발급)
-    PIXABAY_API_KEY     (선택, https://pixabay.com/api/docs/ 에서 무료 발급)
+    PEXELS_API_KEY      (선택, https://www.pexels.com/api/)
+    PIXABAY_API_KEY     (선택)
     REFS_OUTPUT_DIR     (선택, 기본: ~/refs)
 """
 from __future__ import annotations
@@ -23,7 +23,11 @@ from datetime import datetime
 from pathlib import Path
 from typing import Iterable
 
+import time
+import re as _re
+
 import httpx
+from bs4 import BeautifulSoup
 from dotenv import load_dotenv
 from mcp.server.fastmcp import FastMCP
 
@@ -32,7 +36,6 @@ load_dotenv(Path(__file__).parent.parent / ".env")
 REFS_DIR = Path(os.getenv("REFS_OUTPUT_DIR", str(Path.home() / "refs"))).expanduser()
 PEXELS_KEY = os.getenv("PEXELS_API_KEY", "").strip()
 PIXABAY_KEY = os.getenv("PIXABAY_API_KEY", "").strip()
-TMDB_KEY = os.getenv("TMDB_API_KEY", "").strip()
 
 mcp = FastMCP("ref-finder")
 
@@ -135,88 +138,131 @@ class PixabayAdapter:
         return items
 
 
-class TMDBAdapter:
-    """TMDB API: 영화 제목 → 영화 ID → 그 영화의 backdrops/stills.
-    https://developer.themoviedb.org/reference/
+class ShotCafeAdapter:
+    """shot.cafe: 24K개 영화·광고 스틸을 109K개 태그로 검색 가능한 사이트.
+    공식 API 없음 → HTML 스크레이핑.
 
-    사용 흐름:
-      1) Claude(또는 사용자)가 장면 묘사를 영화 제목 후보 5~10개로 변환
-      2) 각 영화를 TMDB에서 검색 → 영화 ID
-      3) 영화 ID로 /movie/{id}/images → backdrops 가져오기
-      4) 영화당 1~2장씩 추려서 모음
+    robots.txt 준수 (확인 2026-05-05):
+      - User-agent: * Disallow: /*,*,*  → 2개 이상 콤마 URL 차단
+      - User-agent: ClaudeBot Disallow: / → ClaudeBot 차단
+      - Crawl-delay: 5 → 요청 간 5초
+
+    이 어댑터의 행동:
+      - 1~2개 태그만 한 번의 요청으로 사용 (콤마 1개까지)
+      - 3개 이상이면 단일 태그 다중 요청 + 클라이언트 교집합
+      - User-Agent: 일반 브라우저 (ClaudeBot 아님)
+      - Crawl-delay 5초 준수
+
+    마크업: <a class="box-img-load" data-img-img="/images/o/<file>"
+              data-img-url="<movie>/<file>" href="#<movie>/<file>">
+              <img src="/images/t/<file>" alt="Still from <Movie> (year) that has been tagged with: <tag>">
     """
-    BASE = "https://api.themoviedb.org/3"
-    IMG_BASE = "https://image.tmdb.org/t/p/w1280"
+    BASE = "https://shot.cafe"
+    UA = ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+          "(KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36")
+    HEADERS = {
+        "User-Agent": UA,
+        "Accept-Language": "en-US,en;q=0.9",
+        "Accept": "text/html,application/xhtml+xml",
+    }
+    CRAWL_DELAY = 5.0  # robots.txt 준수
 
-    def __init__(self, key: str):
-        self.key = key
+    def __init__(self):
+        self._last_request_at = 0.0
 
-    def _get(self, client: httpx.Client, path: str, params: dict | None = None) -> dict:
-        p = {"api_key": self.key}
-        if params:
-            p.update(params)
-        r = client.get(f"{self.BASE}{path}", params=p)
-        if r.status_code != 200:
-            print(f"[tmdb] {path} {r.status_code}: {r.text[:160]}", file=sys.stderr)
-            return {}
-        return r.json()
+    def _throttle(self) -> None:
+        elapsed = time.time() - self._last_request_at
+        if elapsed < self.CRAWL_DELAY:
+            time.sleep(self.CRAWL_DELAY - elapsed)
+        self._last_request_at = time.time()
 
-    def _find_movie(self, client: httpx.Client, title: str) -> dict | None:
-        # 영화 → TV 순으로 시도. 둘 다 같은 endpoint 패턴.
-        for kind in ("movie", "tv"):
-            data = self._get(client, f"/search/{kind}", {"query": title, "language": "en-US"})
-            results = data.get("results", [])
-            if results:
-                top = results[0]
-                top["_kind"] = kind
-                return top
-        return None
-
-    def fetch_stills_by_titles(self, titles: list[str], per_movie: int = 2,
-                               total_limit: int = 10) -> list[RefItem]:
-        if not self.key or not titles:
-            return []
-        items: list[RefItem] = []
+    def _fetch_tag(self, client: httpx.Client, tag_str: str) -> list[RefItem]:
+        """단일 태그 또는 콤마 1개 태그 페이지 가져오기."""
+        self._throttle()
+        url = f"{self.BASE}/tag/{tag_str}"
         try:
-            with httpx.Client(timeout=15.0) as client:
-                for title in titles:
-                    if len(items) >= total_limit:
-                        break
-                    movie = self._find_movie(client, title)
-                    if not movie:
-                        print(f"[tmdb] not found: {title}", file=sys.stderr)
-                        continue
-                    kind = movie.get("_kind", "movie")
-                    mid = movie.get("id")
-                    display_title = (movie.get("title") or movie.get("name") or title)
-                    year = (movie.get("release_date") or movie.get("first_air_date") or "")[:4]
-
-                    images = self._get(client, f"/{kind}/{mid}/images",
-                                       {"include_image_language": "en,null"})
-                    backdrops = images.get("backdrops") or []
-                    # 평점·해상도 정렬
-                    backdrops.sort(
-                        key=lambda b: (b.get("vote_average", 0), b.get("width", 0)),
-                        reverse=True,
-                    )
-                    taken = 0
-                    for bd in backdrops:
-                        if taken >= per_movie or len(items) >= total_limit:
-                            break
-                        path = bd.get("file_path")
-                        if not path:
-                            continue
-                        items.append(RefItem(
-                            source="tmdb",
-                            image_url=f"{self.IMG_BASE}{path}",
-                            page_url=f"https://www.themoviedb.org/{kind}/{mid}",
-                            title=f"{display_title}{' (' + year + ')' if year else ''}",
-                            tags=[display_title, kind],
-                        ))
-                        taken += 1
+            r = client.get(url, headers=self.HEADERS, timeout=20.0, follow_redirects=True)
+            if r.status_code != 200:
+                print(f"[shotcafe] {url} {r.status_code}", file=sys.stderr)
+                return []
         except httpx.HTTPError as e:
-            print(f"[tmdb] error: {e}", file=sys.stderr)
+            print(f"[shotcafe] error fetching {url}: {e}", file=sys.stderr)
+            return []
+
+        soup = BeautifulSoup(r.text, "html.parser")
+        items: list[RefItem] = []
+        for a in soup.select("a.box-img-load"):
+            data_img = (a.get("data-img-img") or "").strip()
+            data_url = (a.get("data-img-url") or "").strip()
+            if not data_img:
+                continue
+            image_url = self.BASE + data_img if data_img.startswith("/") else data_img
+            page_url = f"{self.BASE}/#{data_url}" if data_url else self.BASE
+            img_tag = a.find("img")
+            alt = (img_tag.get("alt") if img_tag else "") or ""
+            # alt 형식: "Still from <Movie> (year) that has been tagged with: <tags>"
+            m = _re.match(r"Still from (.+?) that has been tagged with:\s*(.+)$", alt)
+            if m:
+                movie_label = m.group(1).strip()
+                tag_text = m.group(2).strip()
+            else:
+                movie_label = alt[:80] or tag_str
+                tag_text = tag_str
+            items.append(RefItem(
+                source="shotcafe",
+                image_url=image_url,
+                page_url=page_url,
+                title=movie_label,
+                tags=[t.strip() for t in tag_text.replace("&", ",").split(",") if t.strip()],
+            ))
         return items
+
+    def search(self, tags: list[str], limit: int = 12) -> list[RefItem]:
+        """
+        tags: 태그 리스트 (예: ["rain", "night", "umbrella"])
+        - 1~2개: 단일 요청 (콤마로 결합)
+        - 3개+: 첫 두 개를 콤마로 + 나머지로 클라이언트 교집합 필터
+        """
+        if not tags:
+            return []
+        tags_norm = [t.strip().lower().replace(" ", "+") for t in tags if t.strip()]
+        if not tags_norm:
+            return []
+
+        with httpx.Client(timeout=20.0, follow_redirects=True) as client:
+            # 첫 시도: 처음 2개 태그를 콤마로 (robots.txt 허용 범위)
+            primary = ",".join(tags_norm[:2])
+            pool = self._fetch_tag(client, primary)
+            extra_tags = [t.replace("+", " ") for t in tags_norm[2:]]
+
+            # 추가 태그가 있으면 클라이언트 측 교집합으로 필터
+            if extra_tags and pool:
+                pool = [
+                    it for it in pool
+                    if all(any(extra in (t.lower()) for t in it.tags) for extra in extra_tags)
+                ]
+
+            # 결과가 너무 적으면 단일 태그로 폴백 (가장 첫 태그)
+            if len(pool) < 3 and len(tags_norm) >= 2:
+                fallback = self._fetch_tag(client, tags_norm[0])
+                # 중복 제거
+                seen_urls = {it.image_url for it in pool}
+                for it in fallback:
+                    if it.image_url not in seen_urls:
+                        pool.append(it)
+                        seen_urls.add(it.image_url)
+
+        # 중복 제거 + limit 적용
+        seen = set()
+        result = []
+        for it in pool:
+            if it.image_url in seen:
+                continue
+            seen.add(it.image_url)
+            result.append(it)
+            if len(result) >= limit:
+                break
+        return result
 
 
 # ---------- Output (HTML gallery) ----------
@@ -298,23 +344,23 @@ def find_references(
     query: str = "",
     project: str = "default",
     limit: int = 5,
-    titles: str = "",
+    tags: str = "",
 ) -> dict:
     """
     의도/기획 쿼리로 레퍼런스 수집. 로컬 폴더에 이미지 + index.html + meta.json.
 
     두 가지 모드 (혼합 가능):
-      1) 키워드 모드: query="cinematic asian supermarket" → Pexels/Pixabay 검색
-      2) 영화 모드: titles="Parasite,Minari,The Farewell" → TMDB에서 그 영화들의 스틸
-
-    영화 모드는 시네마틱 톤이 핵심일 때 사용. Claude가 사용자 장면 묘사를 영화
-    후보로 변환해서 titles에 넣는 흐름이 권장.
+      1) 시네마틱 모드 (메인): tags="rain,night,umbrella" → shot.cafe 영화·광고 스틸
+         씬 단위 매칭. 본인 영상 제작 워크플로우 핵심.
+      2) Stock 모드 (보조): query="cinematic moody product" → Pexels/Pixabay
+         소재·물건·텍스처 등 일반 비주얼.
 
     Args:
-        query: 자유 텍스트 키워드 (Pexels/Pixabay 용). 영문 권장.
+        query: 자유 텍스트 키워드 (Pexels/Pixabay 용).
         project: 프로젝트 폴더 이름.
-        limit: 총 결과 수 상한.
-        titles: 콤마로 구분한 영화·드라마 제목 (TMDB 용). 영문 또는 원어 모두 가능.
+        limit: 총 결과 수 상한 (검수 위해 limit*2 다운로드 권장 흐름).
+        tags: 콤마로 구분한 시각 태그 (shot.cafe 용).
+              예: "rain,night,umbrella,woman,street"
 
     Returns:
         {"folder": str, "html": str, "count": int, "items": [...]}
@@ -322,18 +368,19 @@ def find_references(
     timestamp = datetime.now().strftime("%Y%m%d-%H%M")
     out_dir = REFS_DIR / project / timestamp
 
+    shotcafe = ShotCafeAdapter()
     pexels = PexelsAdapter(PEXELS_KEY)
     pixabay = PixabayAdapter(PIXABAY_KEY)
-    tmdb = TMDBAdapter(TMDB_KEY)
 
     pool: list[RefItem] = []
 
-    # TMDB 모드: titles 받으면 영화 스틸 우선
-    title_list = [t.strip() for t in titles.split(",") if t.strip()] if titles else []
-    if title_list:
-        pool.extend(tmdb.fetch_stills_by_titles(title_list, per_movie=2, total_limit=limit * 2))
+    # 시네마틱 모드: tags 받으면 shot.cafe 우선
+    tag_list = [t.strip() for t in tags.split(",") if t.strip()] if tags else []
+    if tag_list:
+        # 검수 단계에서 절반 이상 탈락 가능성을 고려해 limit*2 정도 가져옴
+        pool.extend(shotcafe.search(tag_list, limit=max(15, limit * 2)))
 
-    # 키워드 모드: query 있으면 Pexels/Pixabay
+    # Stock 모드: query 있으면 Pexels/Pixabay
     if query:
         per_source = max(2, limit)
         pool.extend(pexels.search(query, limit=per_source))
