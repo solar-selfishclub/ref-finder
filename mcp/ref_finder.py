@@ -260,7 +260,7 @@ def download(items: Iterable[RefItem], out_dir: Path) -> list[dict]:
     return saved
 
 
-def write_gallery(out_dir: Path, query: str, saved: list[dict]) -> None:
+def write_gallery(out_dir: Path, query: str, saved: list[dict], note: str = "") -> None:
     template = GALLERY_TEMPLATE_PATH.read_text(encoding="utf-8")
     cards_html = []
     for item in saved:
@@ -276,10 +276,18 @@ def write_gallery(out_dir: Path, query: str, saved: list[dict]) -> None:
           </div>
         </div>
         """)
+    note_html = ""
+    if note:
+        note_html = (
+            f'<div style="background:#1f2a1f;border-left:3px solid #6ec46e;'
+            f'padding:10px 14px;margin:12px 0;border-radius:6px;font-size:13px;color:#c8e6c8">'
+            f'<strong>✓ 검수 통과:</strong> {note}</div>'
+        )
     html = (template
             .replace("{{QUERY}}", query)
             .replace("{{TIMESTAMP}}", datetime.now().strftime("%Y-%m-%d %H:%M"))
-            .replace("{{CARDS}}", "\n".join(cards_html)))
+            .replace("{{CARDS}}", "\n".join(cards_html))
+            .replace("{{NOTE}}", note_html))
     (out_dir / "index.html").write_text(html, encoding="utf-8")
 
 
@@ -360,6 +368,74 @@ def find_references(
         "html": str(out_dir / "index.html"),
         "count": len(saved),
         "items": saved,
+    }
+
+
+@mcp.tool()
+def curate_gallery(
+    folder: str,
+    keep: str,
+    note: str = "",
+) -> dict:
+    """
+    기존 갤러리에서 톤 일치하는 항목만 남기고 나머지는 _rejected/로 이동.
+    Claude가 다운로드된 이미지들을 검수한 후 호출.
+
+    Args:
+        folder: 갤러리 폴더 절대 경로 (find_references 결과의 'folder')
+        keep: 남길 항목의 파일명 prefix를 콤마로 (예: "001,005,007")
+              또는 풀 파일명. prefix 매칭 지원.
+        note: 갤러리 상단에 표시할 검수 메모 (예: "비 우산 야경 톤 일치")
+
+    Returns:
+        {"folder", "html", "kept", "removed", "kept_items"}
+    """
+    folder_path = Path(folder).expanduser()
+    meta_path = folder_path / "meta.json"
+    if not meta_path.exists():
+        return {"error": f"meta.json not found in {folder_path}"}
+    meta = json.loads(meta_path.read_text(encoding="utf-8"))
+
+    keep_set = {k.strip() for k in keep.split(",") if k.strip()}
+
+    kept: list[dict] = []
+    removed: list[dict] = []
+    for item in meta.get("items", []):
+        fn = item["filename"]
+        matched = any(fn.startswith(k) or fn == k for k in keep_set)
+        if matched:
+            kept.append(item)
+        else:
+            removed.append(item)
+
+    # 거절된 이미지는 _rejected/ 로 이동 (보존, 나중에 검토 가능)
+    rejected_dir = folder_path / "_rejected"
+    rejected_dir.mkdir(exist_ok=True)
+    for item in removed:
+        src = folder_path / "images" / item["filename"]
+        if src.exists():
+            try:
+                src.rename(rejected_dir / item["filename"])
+            except OSError:
+                pass
+
+    # meta 갱신
+    meta["items"] = kept
+    meta["curate_note"] = note
+    meta["curated_at"] = datetime.now().strftime("%Y%m%d-%H%M%S")
+    meta["removed_count"] = len(removed)
+    meta_path.write_text(
+        json.dumps(meta, ensure_ascii=False, indent=2), encoding="utf-8"
+    )
+
+    write_gallery(folder_path, meta.get("query", ""), kept, note=note)
+
+    return {
+        "folder": str(folder_path),
+        "html": str(folder_path / "index.html"),
+        "kept": len(kept),
+        "removed": len(removed),
+        "kept_items": [it["filename"] for it in kept],
     }
 
 

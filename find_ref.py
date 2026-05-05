@@ -23,13 +23,39 @@ def main():
     p.add_argument("--project", default="default", help="프로젝트 폴더 이름 (기본: default)")
     p.add_argument("--limit", type=int, default=5, help="후보 수 (기본: 5)")
     p.add_argument("--open", action="store_true", help="생성 후 갤러리 자동으로 브라우저에서 열기")
+    # 검수 모드 (Claude가 후보 보고 통과한 것만 남길 때)
+    p.add_argument("--curate", default="",
+                   help='기존 갤러리 폴더 경로. --keep와 함께 사용. 검수 모드.')
+    p.add_argument("--keep", default="",
+                   help='남길 파일명 prefix 콤마 구분. 예: "001,003,007"')
+    p.add_argument("--note", default="",
+                   help='검수 메모 (갤러리 상단에 표시).')
     args = p.parse_args()
-
-    if not args.query and not args.titles:
-        p.error("query 또는 --titles 중 하나는 반드시 필요합니다.")
 
     # Windows 콘솔에서도 한글이 안전하게 출력되도록
     sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+
+    # ---- 검수 모드 ----
+    if args.curate:
+        if not args.keep:
+            p.error("--curate 사용 시 --keep 필수")
+        cfn = getattr(ref_finder.curate_gallery, "fn", ref_finder.curate_gallery)
+        print(f"[curate] folder: {args.curate}")
+        print(f"[curate] keep: {args.keep}")
+        result = cfn(folder=args.curate, keep=args.keep, note=args.note)
+        if "error" in result:
+            print(f"[error] {result['error']}")
+            sys.exit(1)
+        print(f"\n[done] {result['kept']}장 남김 / {result['removed']}장 제거")
+        print(f"  gallery: {result['html']}")
+        if args.open:
+            webbrowser.open(f"file:///{result['html'].replace(os.sep, '/')}")
+            print(f"\n[open] 갤러리를 브라우저에서 열었습니다.")
+        return
+
+    # ---- 수집 모드 ----
+    if not args.query and not args.titles:
+        p.error("query 또는 --titles 중 하나는 반드시 필요합니다 (또는 --curate 모드 사용).")
 
     fn = getattr(ref_finder.find_references, "fn", ref_finder.find_references)
     if args.titles:
