@@ -346,6 +346,173 @@ def download(items: Iterable[RefItem], out_dir: Path) -> list[dict]:
     return saved
 
 
+def make_session_slug(timestamp: str, tags: str = "", query: str = "") -> str:
+    """타임스탬프 + 첫 1~2 키워드로 폴더 이름 생성.
+    예: '20260505-1612-rain-night' 또는 '20260505-1612-cosmetic'.
+    """
+    parts = []
+    if tags:
+        parts = [t.strip() for t in tags.split(",") if t.strip()][:2]
+    elif query:
+        parts = query.split()[:2]
+    if not parts:
+        return timestamp
+    slug = "-".join(slugify(p) for p in parts)[:40].rstrip("-")
+    return f"{timestamp}-{slug}" if slug else timestamp
+
+
+def _build_project_dashboard(project_dir: Path) -> None:
+    """프로젝트 폴더 안의 모든 세션을 카드로 정리한 _index.html 생성."""
+    if not project_dir.exists() or not project_dir.is_dir():
+        return
+    sessions = []
+    for sub in sorted(project_dir.iterdir(), reverse=True):
+        if not sub.is_dir() or sub.name.startswith("_"):
+            continue
+        meta_path = sub / "meta.json"
+        if not meta_path.exists():
+            continue
+        try:
+            meta = json.loads(meta_path.read_text(encoding="utf-8"))
+        except json.JSONDecodeError:
+            continue
+        items = meta.get("items", [])
+        thumb = items[0]["filename"] if items else None
+        sessions.append({
+            "name": sub.name,
+            "session_dir": sub.name,
+            "query": meta.get("query", ""),
+            "tags": meta.get("tags", ""),
+            "timestamp": meta.get("timestamp", sub.name[:13]),
+            "count": len(items),
+            "thumb": f"{sub.name}/images/{thumb}" if thumb else None,
+            "note": meta.get("curate_note", ""),
+        })
+
+    cards = []
+    for s in sessions:
+        thumb_html = (f'<img src="{s["thumb"]}" alt="" loading="lazy">'
+                      if s["thumb"] else '<div class="no-thumb">(빈 세션)</div>')
+        info_line = s["query"] or s["tags"] or "(쿼리 없음)"
+        note_html = f'<div class="note">{s["note"]}</div>' if s["note"] else ""
+        cards.append(f"""
+        <a class="session-card" href="{s['session_dir']}/index.html">
+          {thumb_html}
+          <div class="info">
+            <div class="ts">{s['timestamp']}</div>
+            <div class="q">{info_line}</div>
+            <div class="count">{s['count']}장</div>
+            {note_html}
+          </div>
+        </a>""")
+
+    html = _DASHBOARD_TEMPLATE.replace(
+        "{{TITLE}}", f"📁 {project_dir.name}"
+    ).replace(
+        "{{SUBTITLE}}", f"세션 {len(sessions)}개"
+    ).replace(
+        "{{BACK}}", '<a class="back" href="../_index.html">← 전체 프로젝트</a>'
+    ).replace(
+        "{{CARDS}}", "\n".join(cards) or '<p style="color:#888">아직 세션이 없습니다.</p>'
+    )
+    (project_dir / "_index.html").write_text(html, encoding="utf-8")
+
+
+def _build_top_dashboard(refs_dir: Path) -> None:
+    """모든 프로젝트의 카운트를 정리한 ~/refs/_index.html 생성."""
+    if not refs_dir.exists() or not refs_dir.is_dir():
+        return
+    projects = []
+    for proj in sorted(refs_dir.iterdir()):
+        if not proj.is_dir() or proj.name.startswith("_"):
+            continue
+        sessions = [s for s in proj.iterdir() if s.is_dir() and not s.name.startswith("_")]
+        if not sessions:
+            continue
+        # 가장 최근 세션의 첫 이미지를 썸네일로
+        sessions_sorted = sorted(sessions, reverse=True)
+        thumb = None
+        for sess in sessions_sorted:
+            mp = sess / "meta.json"
+            if mp.exists():
+                try:
+                    meta = json.loads(mp.read_text(encoding="utf-8"))
+                    items = meta.get("items", [])
+                    if items:
+                        thumb = f"{proj.name}/{sess.name}/images/{items[0]['filename']}"
+                        break
+                except json.JSONDecodeError:
+                    pass
+        last_ts = sessions_sorted[0].name[:13] if sessions_sorted else ""
+        projects.append({
+            "name": proj.name,
+            "count": len(sessions),
+            "thumb": thumb,
+            "last": last_ts,
+        })
+
+    cards = []
+    for p in projects:
+        thumb_html = (f'<img src="{p["thumb"]}" alt="" loading="lazy">'
+                      if p["thumb"] else '<div class="no-thumb">(빈 프로젝트)</div>')
+        cards.append(f"""
+        <a class="session-card" href="{p['name']}/_index.html">
+          {thumb_html}
+          <div class="info">
+            <div class="ts">{p['name']}</div>
+            <div class="q">최근: {p['last']}</div>
+            <div class="count">세션 {p['count']}개</div>
+          </div>
+        </a>""")
+
+    html = _DASHBOARD_TEMPLATE.replace(
+        "{{TITLE}}", "🎬 ref-finder"
+    ).replace(
+        "{{SUBTITLE}}", f"프로젝트 {len(projects)}개"
+    ).replace(
+        "{{BACK}}", ""
+    ).replace(
+        "{{CARDS}}", "\n".join(cards) or '<p style="color:#888">아직 프로젝트가 없습니다.</p>'
+    )
+    (refs_dir / "_index.html").write_text(html, encoding="utf-8")
+
+
+_DASHBOARD_TEMPLATE = """<!DOCTYPE html>
+<html lang="ko"><head><meta charset="UTF-8"><title>{{TITLE}}</title>
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+body{font-family:-apple-system,"Segoe UI","Noto Sans KR",sans-serif;
+     background:#0f0f12;color:#e8e8ec;padding:24px}
+header{margin-bottom:24px;padding-bottom:16px;border-bottom:1px solid #2a2a30}
+h1{font-size:20px;font-weight:600;margin-bottom:6px}
+.subtitle{font-size:13px;color:#8a8a92}
+.back{display:inline-block;margin-bottom:12px;color:#6ec46e;text-decoration:none;font-size:13px}
+.back:hover{text-decoration:underline}
+.grid{column-count:4;column-gap:16px}
+@media (max-width:1400px){.grid{column-count:3}}
+@media (max-width:900px){.grid{column-count:2}}
+@media (max-width:600px){.grid{column-count:1}}
+.session-card{display:block;background:#1a1a20;border-radius:10px;
+              overflow:hidden;text-decoration:none;color:inherit;
+              margin-bottom:16px;break-inside:avoid;transition:transform .15s}
+.session-card:hover{transform:translateY(-2px)}
+.session-card img{width:100%;height:auto;display:block}
+.session-card .no-thumb{aspect-ratio:16/9;display:flex;align-items:center;
+                        justify-content:center;background:#2a2a30;color:#6a6a72;font-size:13px}
+.info{padding:10px 12px}
+.ts{font-size:12px;color:#a0a0a8;margin-bottom:4px}
+.q{font-size:14px;color:#e8e8ec;margin-bottom:4px;
+   overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.count{font-size:11px;color:#6ec46e}
+.note{margin-top:6px;font-size:11px;color:#8a8a92;line-height:1.4;
+      max-height:48px;overflow:hidden}
+</style></head><body>
+<header>{{BACK}}<h1>{{TITLE}}</h1><div class="subtitle">{{SUBTITLE}}</div></header>
+<div class="grid">{{CARDS}}</div>
+</body></html>
+"""
+
+
 def write_gallery(out_dir: Path, query: str, saved: list[dict], note: str = "") -> None:
     template = GALLERY_TEMPLATE_PATH.read_text(encoding="utf-8")
     cards_html = []
@@ -406,7 +573,8 @@ def find_references(
         {"folder": str, "html": str, "count": int, "items": [...]}
     """
     timestamp = datetime.now().strftime("%Y%m%d-%H%M")
-    out_dir = REFS_DIR / project / timestamp
+    session_slug = make_session_slug(timestamp, tags=tags, query=query)
+    out_dir = REFS_DIR / project / session_slug
 
     shotcafe = ShotCafeAdapter()
     pexels = PexelsAdapter(PEXELS_KEY)
@@ -438,23 +606,31 @@ def find_references(
                     break
 
     saved = download(interleaved, out_dir)
-    write_gallery(out_dir, query, saved)
+    write_gallery(out_dir, query or tags, saved)
 
     meta = {
         "query": query,
+        "tags": tags,
         "project": project,
         "timestamp": timestamp,
+        "session_slug": session_slug,
         "items": saved,
     }
     (out_dir / "meta.json").write_text(
         json.dumps(meta, ensure_ascii=False, indent=2), encoding="utf-8"
     )
 
+    # 대시보드 자동 갱신
+    _build_project_dashboard(REFS_DIR / project)
+    _build_top_dashboard(REFS_DIR)
+
     return {
         "folder": str(out_dir),
         "html": str(out_dir / "index.html"),
         "count": len(saved),
         "items": saved,
+        "project_dashboard": str(REFS_DIR / project / "_index.html"),
+        "top_dashboard": str(REFS_DIR / "_index.html"),
     }
 
 
@@ -515,7 +691,11 @@ def curate_gallery(
         json.dumps(meta, ensure_ascii=False, indent=2), encoding="utf-8"
     )
 
-    write_gallery(folder_path, meta.get("query", ""), kept, note=note)
+    write_gallery(folder_path, meta.get("query", "") or meta.get("tags", ""), kept, note=note)
+
+    # 대시보드 갱신 (curate 후 통과 수가 바뀌었으므로)
+    _build_project_dashboard(folder_path.parent)
+    _build_top_dashboard(folder_path.parent.parent)
 
     return {
         "folder": str(folder_path),
