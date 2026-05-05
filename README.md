@@ -2,7 +2,12 @@
 
 AI 영상 크리에이터를 위한 **레퍼런스 자동 수집 도구**.
 
-키워드를 던지면 [Pexels](https://www.pexels.com)(+선택 Pixabay)에서 광고·시네마틱 톤 사진 5장을 모아 로컬 HTML 갤러리로 보여줍니다. 한 컷 레퍼런스 찾는 데 30분 → 5분.
+장면을 묘사하면 두 가지 방식으로 5~10장을 모아 로컬 HTML 갤러리로 보여줍니다:
+
+1. **TMDB 모드** ⭐ — Claude가 어울리는 영화·드라마를 떠올리고, [TMDB](https://www.themoviedb.org)에서 진짜 영화 스틸을 가져옴. **시네마틱 톤이 핵심일 때**.
+2. **Stock 모드** — [Pexels](https://www.pexels.com)/Pixabay에서 키워드로 일반 비주얼.
+
+한 컷 레퍼런스 찾는 데 30분 → 5분.
 
 > 🧽 OS 청사진의 첫 부품 — "나는 의도와 최종 디렉팅만 하고, 나머지는 시스템이 한다"
 
@@ -58,17 +63,20 @@ cd ref-finder
 ## 자주 쓰는 명령어 모음 (PowerShell 직접 사용)
 
 ```powershell
-# 가장 기본 — 5장 받고 갤러리 자동 열기 (ref.ps1 권장)
-.\ref.ps1 "moody product close-up"
+# TMDB 모드 — 영화 스틸 (시네마틱 톤) ⭐
+py find_ref.py --open --project hmart-grocery `
+  --titles "Minari,Parasite,The Farewell,Past Lives,Pachinko"
 
-# 프로젝트별 폴더로 분리
-.\ref.ps1 --project ad-cosmetic-spring "natural minimal cosmetic"
+# Stock 모드 — Pexels 키워드 검색
+py find_ref.py --open --project ad-cosmetic "natural minimal cosmetic"
 
-# 더 많이 받기 (5장이 부족할 때만)
-.\ref.ps1 --limit 10 "cinematic dark night street"
+# 두 모드 혼합 — TMDB + Pexels
+py find_ref.py --open --project mixed `
+  --titles "Lost in Translation,Past Lives" `
+  "minimal cosmetic"
 
-# find_ref.py 직접 호출 (자동 설치 점검 없음)
-py find_ref.py --open "minimal cosmetic"
+# 더 많이 받기
+py find_ref.py --open --limit 12 --titles "Drive,Blade Runner 2049,John Wick"
 ```
 
 결과는 `~/refs/<프로젝트명>/<날짜시간>/`에 저장됩니다. `index.html`을 더블클릭해서 언제든 다시 열 수 있어요.
@@ -102,19 +110,27 @@ ref --project ad-X "moody close-up"
 
 ## API 키 발급 (무료, 5분)
 
-### Pexels (필수) — 영상 크리에이터에게 가장 보편적
+### TMDB ⭐ (강력 권장 — 시네마틱 톤의 핵심)
+1. https://www.themoviedb.org/settings/api 접속 (가입 필요)
+2. "Request API Key" → "Developer" 선택
+3. 사용 사례: "Personal use for video reference moodboard" 정도면 충분
+4. 발급받은 **"API 키"** (짧은 16진수)를 `.env`의 `TMDB_API_KEY=` 뒤에 붙여넣기
+
+> 두 종류 키가 보일 텐데 (긴 v4 토큰 / 짧은 v3 키) — **짧은 쪽**을 쓰세요.
+
+### Pexels (선택 — Stock 이미지)
 1. https://www.pexels.com/api/ 접속
-2. "Get Started" 또는 "Your API Key" → 가입 (이메일·비밀번호 또는 Google)
+2. "Get Started" → 가입 (이메일·비밀번호 또는 Google)
 3. 발급받은 API key를 `.env`의 `PEXELS_API_KEY=` 뒤에 붙여넣기
 
-### Pixabay (선택) — 더 다양한 출처 추가
+### Pixabay (선택 — 더 다양한 stock 출처)
 1. https://pixabay.com/api/docs/ 접속
 2. 가입 후 "Your API key" 확인
 3. `.env`의 `PIXABAY_API_KEY=` 뒤에 붙여넣기
 
 ### 왜 filmvibes·Pinterest가 빠져있나요?
 - **Pinterest**: Standard Access 미승인 앱은 검색 API 401 차단 (2025 정책)
-- **filmvibes.io**: 무로그인 검색이 차단되어 Google OAuth 흐름이 필요. 작업량 대비 안정성 낮음
+- **filmvibes.io**: 무로그인 검색이 차단되어 Google OAuth 흐름 필요. TMDB로 대체.
 - 둘 다 v0.2에서 별도 부품으로 추적 가능
 
 ---

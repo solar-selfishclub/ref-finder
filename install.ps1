@@ -58,12 +58,18 @@ if (-not (Test-Path $envPath)) {
         Copy-Item $exPath $envPath
         Write-Host "  .env 파일을 만들었습니다." -ForegroundColor Green
         Write-Host ""
-        Write-Host "  >>> 다음 단계: Pexels API 키를 .env에 넣어야 작동합니다 <<<" -ForegroundColor Yellow
-        Write-Host "    1. https://www.pexels.com/api/ 에서 무료 가입 (3분)" -ForegroundColor Yellow
-        Write-Host "    2. 발급받은 API key 복사" -ForegroundColor Yellow
-        Write-Host "    3. 메모장으로 .env 열고 PEXELS_API_KEY= 뒤에 붙여넣고 저장" -ForegroundColor Yellow
+        Write-Host "  >>> 다음 단계: API 키를 .env에 넣어야 작동합니다 <<<" -ForegroundColor Yellow
         Write-Host ""
-        Write-Host "    .env 파일 위치: $envPath" -ForegroundColor Cyan
+        Write-Host "  [강력 권장] TMDB - 영화 스틸 (시네마틱 톤)" -ForegroundColor Yellow
+        Write-Host "    1. https://www.themoviedb.org/settings/api  → 가입 → API 키 발급" -ForegroundColor White
+        Write-Host "    2. 짧은 쪽 'API 키' (16진수) 복사" -ForegroundColor White
+        Write-Host "    3. .env 의 TMDB_API_KEY= 뒤에 붙여넣기" -ForegroundColor White
+        Write-Host ""
+        Write-Host "  [선택] Pexels - stock 이미지" -ForegroundColor Yellow
+        Write-Host "    1. https://www.pexels.com/api/  → 가입 → API key" -ForegroundColor White
+        Write-Host "    2. .env 의 PEXELS_API_KEY= 뒤에 붙여넣기" -ForegroundColor White
+        Write-Host ""
+        Write-Host "  .env 파일 위치: $envPath" -ForegroundColor Cyan
     } else {
         Write-Warning "  .env.example을 찾을 수 없음. 건너뜀."
     }

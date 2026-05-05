@@ -32,6 +32,7 @@ load_dotenv(Path(__file__).parent.parent / ".env")
 REFS_DIR = Path(os.getenv("REFS_OUTPUT_DIR", str(Path.home() / "refs"))).expanduser()
 PEXELS_KEY = os.getenv("PEXELS_API_KEY", "").strip()
 PIXABAY_KEY = os.getenv("PIXABAY_API_KEY", "").strip()
+TMDB_KEY = os.getenv("TMDB_API_KEY", "").strip()
 
 mcp = FastMCP("ref-finder")
 
@@ -134,6 +135,90 @@ class PixabayAdapter:
         return items
 
 
+class TMDBAdapter:
+    """TMDB API: 영화 제목 → 영화 ID → 그 영화의 backdrops/stills.
+    https://developer.themoviedb.org/reference/
+
+    사용 흐름:
+      1) Claude(또는 사용자)가 장면 묘사를 영화 제목 후보 5~10개로 변환
+      2) 각 영화를 TMDB에서 검색 → 영화 ID
+      3) 영화 ID로 /movie/{id}/images → backdrops 가져오기
+      4) 영화당 1~2장씩 추려서 모음
+    """
+    BASE = "https://api.themoviedb.org/3"
+    IMG_BASE = "https://image.tmdb.org/t/p/w1280"
+
+    def __init__(self, key: str):
+        self.key = key
+
+    def _get(self, client: httpx.Client, path: str, params: dict | None = None) -> dict:
+        p = {"api_key": self.key}
+        if params:
+            p.update(params)
+        r = client.get(f"{self.BASE}{path}", params=p)
+        if r.status_code != 200:
+            print(f"[tmdb] {path} {r.status_code}: {r.text[:160]}", file=sys.stderr)
+            return {}
+        return r.json()
+
+    def _find_movie(self, client: httpx.Client, title: str) -> dict | None:
+        # 영화 → TV 순으로 시도. 둘 다 같은 endpoint 패턴.
+        for kind in ("movie", "tv"):
+            data = self._get(client, f"/search/{kind}", {"query": title, "language": "en-US"})
+            results = data.get("results", [])
+            if results:
+                top = results[0]
+                top["_kind"] = kind
+                return top
+        return None
+
+    def fetch_stills_by_titles(self, titles: list[str], per_movie: int = 2,
+                               total_limit: int = 10) -> list[RefItem]:
+        if not self.key or not titles:
+            return []
+        items: list[RefItem] = []
+        try:
+            with httpx.Client(timeout=15.0) as client:
+                for title in titles:
+                    if len(items) >= total_limit:
+                        break
+                    movie = self._find_movie(client, title)
+                    if not movie:
+                        print(f"[tmdb] not found: {title}", file=sys.stderr)
+                        continue
+                    kind = movie.get("_kind", "movie")
+                    mid = movie.get("id")
+                    display_title = (movie.get("title") or movie.get("name") or title)
+                    year = (movie.get("release_date") or movie.get("first_air_date") or "")[:4]
+
+                    images = self._get(client, f"/{kind}/{mid}/images",
+                                       {"include_image_language": "en,null"})
+                    backdrops = images.get("backdrops") or []
+                    # 평점·해상도 정렬
+                    backdrops.sort(
+                        key=lambda b: (b.get("vote_average", 0), b.get("width", 0)),
+                        reverse=True,
+                    )
+                    taken = 0
+                    for bd in backdrops:
+                        if taken >= per_movie or len(items) >= total_limit:
+                            break
+                        path = bd.get("file_path")
+                        if not path:
+                            continue
+                        items.append(RefItem(
+                            source="tmdb",
+                            image_url=f"{self.IMG_BASE}{path}",
+                            page_url=f"https://www.themoviedb.org/{kind}/{mid}",
+                            title=f"{display_title}{' (' + year + ')' if year else ''}",
+                            tags=[display_title, kind],
+                        ))
+                        taken += 1
+        except httpx.HTTPError as e:
+            print(f"[tmdb] error: {e}", file=sys.stderr)
+        return items
+
+
 # ---------- Output (HTML gallery) ----------
 
 GALLERY_TEMPLATE_PATH = Path(__file__).parent.parent / "templates" / "gallery.html"
@@ -202,18 +287,26 @@ def write_gallery(out_dir: Path, query: str, saved: list[dict]) -> None:
 
 @mcp.tool()
 def find_references(
-    query: str,
+    query: str = "",
     project: str = "default",
     limit: int = 5,
+    titles: str = "",
 ) -> dict:
     """
-    의도/기획 쿼리로 Pexels + Pixabay에서 레퍼런스 후보 수집.
-    로컬 폴더에 이미지 다운로드 + index.html 생성 + meta.json 기록.
+    의도/기획 쿼리로 레퍼런스 수집. 로컬 폴더에 이미지 + index.html + meta.json.
+
+    두 가지 모드 (혼합 가능):
+      1) 키워드 모드: query="cinematic asian supermarket" → Pexels/Pixabay 검색
+      2) 영화 모드: titles="Parasite,Minari,The Farewell" → TMDB에서 그 영화들의 스틸
+
+    영화 모드는 시네마틱 톤이 핵심일 때 사용. Claude가 사용자 장면 묘사를 영화
+    후보로 변환해서 titles에 넣는 흐름이 권장.
 
     Args:
-        query: 자유 텍스트 (영문 키워드가 가장 결과 좋음)
-        project: 프로젝트 폴더 이름 (기본 default)
-        limit: 총 결과 수 상한 (기본 5)
+        query: 자유 텍스트 키워드 (Pexels/Pixabay 용). 영문 권장.
+        project: 프로젝트 폴더 이름.
+        limit: 총 결과 수 상한.
+        titles: 콤마로 구분한 영화·드라마 제목 (TMDB 용). 영문 또는 원어 모두 가능.
 
     Returns:
         {"folder": str, "html": str, "count": int, "items": [...]}
@@ -223,12 +316,20 @@ def find_references(
 
     pexels = PexelsAdapter(PEXELS_KEY)
     pixabay = PixabayAdapter(PIXABAY_KEY)
+    tmdb = TMDBAdapter(TMDB_KEY)
 
-    # 각 출처에서 limit만큼 받아와서 인터리브 → 최종 limit개로 잘라냄
-    per_source = max(2, limit)
     pool: list[RefItem] = []
-    pool.extend(pexels.search(query, limit=per_source))
-    pool.extend(pixabay.search(query, limit=per_source))
+
+    # TMDB 모드: titles 받으면 영화 스틸 우선
+    title_list = [t.strip() for t in titles.split(",") if t.strip()] if titles else []
+    if title_list:
+        pool.extend(tmdb.fetch_stills_by_titles(title_list, per_movie=2, total_limit=limit * 2))
+
+    # 키워드 모드: query 있으면 Pexels/Pixabay
+    if query:
+        per_source = max(2, limit)
+        pool.extend(pexels.search(query, limit=per_source))
+        pool.extend(pixabay.search(query, limit=per_source))
 
     by_source: dict[str, list[RefItem]] = {}
     for it in pool:

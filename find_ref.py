@@ -17,18 +17,26 @@ import ref_finder
 
 def main():
     p = argparse.ArgumentParser(description="ref-finder: 의도/기획 → 레퍼런스 갤러리")
-    p.add_argument("query", help="자유 텍스트 (키워드/의뢰서/스토리보드)")
+    p.add_argument("query", nargs="?", default="", help="자유 텍스트 키워드 (Pexels/Pixabay)")
+    p.add_argument("--titles", default="",
+                   help='콤마로 구분한 영화·드라마 제목 (TMDB). 예: "Parasite,Minari,The Farewell"')
     p.add_argument("--project", default="default", help="프로젝트 폴더 이름 (기본: default)")
     p.add_argument("--limit", type=int, default=5, help="후보 수 (기본: 5)")
     p.add_argument("--open", action="store_true", help="생성 후 갤러리 자동으로 브라우저에서 열기")
     args = p.parse_args()
 
+    if not args.query and not args.titles:
+        p.error("query 또는 --titles 중 하나는 반드시 필요합니다.")
+
     # Windows 콘솔에서도 한글이 안전하게 출력되도록
     sys.stdout.reconfigure(encoding="utf-8", errors="replace")
 
     fn = getattr(ref_finder.find_references, "fn", ref_finder.find_references)
-    print(f"[search] {args.query!r}")
-    result = fn(query=args.query, project=args.project, limit=args.limit)
+    if args.titles:
+        print(f"[tmdb] titles: {args.titles}")
+    if args.query:
+        print(f"[search] {args.query!r}")
+    result = fn(query=args.query, project=args.project, limit=args.limit, titles=args.titles)
 
     print(f"\n[done] {result['count']}장 수집 완료")
     print(f"  folder : {result['folder']}")
