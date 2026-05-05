@@ -1,0 +1,152 @@
+# ref-finder
+
+AI 영상 크리에이터를 위한 **레퍼런스 자동 수집 도구**.
+
+키워드를 던지면 [filmvibes.io](https://filmvibes.io)에서 영화·드라마 스틸 5장을 모아 로컬 HTML 갤러리로 보여줍니다. 한 컷 레퍼런스 찾는 데 30분 → 5분.
+
+> 🧽 OS 청사진의 첫 부품 — "나는 의도와 최종 디렉팅만 하고, 나머지는 시스템이 한다"
+
+---
+
+## 새 컴퓨터에서 시작하기 (Windows)
+
+### 1단계 — 이 저장소 받기
+
+PowerShell을 열고 (시작 버튼 → "PowerShell" 검색):
+
+```powershell
+cd $HOME
+git clone https://github.com/solar-selfishclub/ref-finder.git
+cd ref-finder
+```
+
+> **git이 없다고 뜨면**: https://git-scm.com/download/win 에서 다운로드 → 다음만 누르며 설치 → PowerShell 다시 열고 위 명령 재실행.
+
+### 2단계 — 한 줄로 자동 설치
+
+```powershell
+.\install.ps1
+```
+
+이 한 줄이 자동으로 처리합니다:
+- Python 설치 (없으면)
+- 필요한 패키지 설치
+- `.env` 환경 파일 생성
+- `~/refs` 출력 폴더 생성
+
+> 처음에 "이 스크립트는 신뢰할 수 없습니다" 에러가 뜨면 다음 한 번만 실행:
+> ```powershell
+> Set-ExecutionPolicy -Scope CurrentUser RemoteSigned
+> ```
+
+### 3단계 — 사용 시작
+
+```powershell
+py find_ref.py --open "natural cosmetic minimal"
+```
+
+→ 5장 다운로드 + 자동으로 브라우저에서 갤러리 열림. 끝.
+
+---
+
+## 자주 쓰는 명령어 모음
+
+```powershell
+# 가장 기본 — 5장 받고 갤러리 자동 열기
+py find_ref.py --open "moody product close-up"
+
+# 프로젝트별 폴더로 분리
+py find_ref.py --open --project ad-cosmetic-spring "natural minimal cosmetic"
+
+# 더 많이 받기 (5장이 부족할 때만)
+py find_ref.py --open --limit 10 "cinematic dark night street"
+
+# 갤러리 자동으로 안 열기 (그냥 다운로드만)
+py find_ref.py "minimal cosmetic"
+```
+
+결과는 `~/refs/<프로젝트명>/<날짜시간>/`에 저장됩니다. `index.html`을 더블클릭해서 언제든 다시 열 수 있어요.
+
+---
+
+## 한 번 더 짧은 단축키 만들기 (선택)
+
+매번 `cd`나 `py find_ref.py`가 귀찮으면 PowerShell에 짧은 별명 등록:
+
+```powershell
+notepad $PROFILE
+```
+
+(파일 없다고 뜨면 "예" 선택)
+
+다음 한 줄을 추가하고 저장:
+
+```powershell
+function ref { py "$HOME\ref-finder\find_ref.py" --open @args }
+```
+
+이제 새 PowerShell 창에서 어디서든:
+
+```powershell
+ref "minimal cosmetic"
+ref --project ad-X "moody close-up"
+```
+
+---
+
+## Pinterest는 왜 빠져있나요?
+
+Pinterest API는 2025년부터 "Standard Access" 승인을 받은 비즈니스 앱만 검색을 허용합니다. 일반 토큰은 401 에러로 차단됩니다. 이 도구는 401을 만나면 조용히 건너뛰고 filmvibes만 사용합니다.
+
+해결 옵션:
+1. Pinterest Standard Access 신청 (며칠~몇 주, 사용 사례 설명 필요)
+2. v0.2에서 다른 무료 출처(Behance, Vimeo, Are.na) 추가 (가장 현실적)
+
+---
+
+## 폴더 구조
+
+```
+ref-finder/
+├── install.ps1          ← 새 컴퓨터에서 한 줄로 설치
+├── find_ref.py          ← 메인 CLI
+├── mcp/
+│   └── ref_finder.py    ← 검색 + 다운로드 + 갤러리 생성 로직
+├── templates/
+│   └── gallery.html     ← 별표 토글 가능한 갤러리 UI
+├── commands/
+│   └── find-ref.md      ← Claude Code slash 커맨드 정의
+├── plugin.json          ← Claude Code 플러그인 메타
+├── .env.example         ← 환경 변수 자리 (실제 .env는 git에 포함되지 않음)
+└── README.md
+```
+
+---
+
+## 문제 해결
+
+**"py가 인식되지 않습니다"**
+→ Python 설치 후 PowerShell을 새로 여세요. 그래도 안 되면 `install.ps1` 다시 실행.
+
+**갤러리가 빈 채로 뜸**
+→ 키워드를 영어로 바꿔보세요. filmvibes는 한국어 검색이 약합니다.
+
+**`.env` 토큰을 GitHub에 실수로 올렸어요**
+→ Pinterest 토큰은 어차피 차단된 상태라 큰 문제는 아니지만, 발급한 곳에서 토큰 회전(regenerate)하세요.
+
+---
+
+## 다음 부품 (로드맵)
+
+이 도구는 더 큰 OS의 첫 부품입니다:
+
+1. ✅ **ref-finder** (이거) — 레퍼런스 자동 수집
+2. 이미지 프롬프트 생성기 — 별표 레퍼런스 + 기획 → 나노바나나 프롬프트
+3. **영상 직전 AI 1차 검수기** ⭐ — 크레딧 절약 핵심
+4. 영상 프롬프트 생성기 — Kling 프롬프트 (1~2번에 끝)
+
+---
+
+## 라이선스
+
+MIT — [LICENSE](LICENSE)

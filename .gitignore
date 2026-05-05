@@ -1,0 +1,28 @@
+# 비밀: 절대 커밋 금지
+.env
+
+# 출력물
+refs/
+*/refs/
+
+# 개발 임시
+test_run.py
+test_*.py
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.egg-info/
+.venv/
+venv/
+
+# OS
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# IDE
+.vscode/
+.idea/
+*.swp

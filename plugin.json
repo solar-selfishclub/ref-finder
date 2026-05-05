@@ -1,0 +1,19 @@
+{
+  "name": "ref-finder",
+  "version": "0.1.0",
+  "description": "AI 영상 크리에이터를 위한 레퍼런스 자동 수집기. 의도/기획을 던지면 Pinterest + filmvibes.io에서 후보를 모아 로컬 HTML 갤러리로 출력.",
+  "author": "OS Interview Skill (zemma)",
+  "commands": [
+    "commands/find-ref.md"
+  ],
+  "mcpServers": {
+    "ref-finder": {
+      "command": "python",
+      "args": ["./mcp/ref_finder.py"],
+      "env": {
+        "PINTEREST_ACCESS_TOKEN": "${PINTEREST_ACCESS_TOKEN}",
+        "REFS_OUTPUT_DIR": "${REFS_OUTPUT_DIR}"
+      }
+    }
+  }
+}

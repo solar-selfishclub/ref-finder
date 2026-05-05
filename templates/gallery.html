@@ -1,0 +1,158 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<title>ref-finder · {{QUERY}}</title>
+<style>
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    font-family: -apple-system, "Segoe UI", "Noto Sans KR", sans-serif;
+    background: #0f0f12;
+    color: #e8e8ec;
+    padding: 24px;
+  }
+  header {
+    margin-bottom: 24px;
+    padding-bottom: 16px;
+    border-bottom: 1px solid #2a2a30;
+  }
+  header h1 { font-size: 18px; margin: 0 0 6px; font-weight: 600; }
+  header .meta { font-size: 13px; color: #8a8a92; }
+  .grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+    gap: 16px;
+  }
+  .card {
+    position: relative;
+    background: #1a1a20;
+    border-radius: 10px;
+    overflow: hidden;
+    transition: transform 0.15s;
+  }
+  .card.starred { outline: 2px solid #ffd24a; }
+  .card:hover { transform: translateY(-2px); }
+  .card img {
+    width: 100%;
+    height: 240px;
+    object-fit: cover;
+    display: block;
+  }
+  .star {
+    position: absolute;
+    top: 8px; right: 8px;
+    background: rgba(0,0,0,0.6);
+    border: none;
+    color: #ffd24a;
+    font-size: 22px;
+    width: 36px; height: 36px;
+    border-radius: 50%;
+    cursor: pointer;
+    z-index: 2;
+  }
+  .star:hover { background: rgba(0,0,0,0.85); }
+  .meta {
+    padding: 10px 12px;
+    font-size: 12px;
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+  }
+  .source {
+    display: inline-block;
+    padding: 2px 8px;
+    background: #2a2a30;
+    border-radius: 4px;
+    font-size: 11px;
+    color: #a0a0a8;
+    width: fit-content;
+  }
+  .title { color: #c0c0c8; }
+  footer {
+    margin-top: 32px;
+    font-size: 12px;
+    color: #6a6a72;
+  }
+  #starred-list {
+    padding: 12px 16px;
+    background: #1a1a20;
+    border-radius: 8px;
+    margin-top: 16px;
+    display: none;
+  }
+  #starred-list.has-items { display: block; }
+</style>
+</head>
+<body>
+<header>
+  <h1>🎬 ref-finder</h1>
+  <div class="meta">
+    <strong>쿼리:</strong> {{QUERY}} · <strong>수집:</strong> {{TIMESTAMP}}
+  </div>
+</header>
+
+<div class="grid">
+{{CARDS}}
+</div>
+
+<div id="starred-list">
+  <strong>별표 표시한 레퍼런스:</strong>
+  <span id="starred-count">0</span>개
+  (다음 부품 = 프롬프트 생성기로 넘길 후보)
+</div>
+
+<footer>
+  ref-finder v0.1 · 출처: Pinterest + filmvibes.io · 별표는 localStorage에 저장됩니다
+</footer>
+
+<script>
+const STORAGE_KEY = 'ref-finder-stars-' + location.pathname;
+
+function loadStars() {
+  try { return new Set(JSON.parse(localStorage.getItem(STORAGE_KEY)) || []); }
+  catch (e) { return new Set(); }
+}
+
+function saveStars(set) {
+  localStorage.setItem(STORAGE_KEY, JSON.stringify([...set]));
+  updateStarredList(set);
+}
+
+function updateStarredList(set) {
+  const el = document.getElementById('starred-list');
+  const cnt = document.getElementById('starred-count');
+  cnt.textContent = set.size;
+  el.classList.toggle('has-items', set.size > 0);
+}
+
+function toggleStar(btn) {
+  const card = btn.closest('.card');
+  const id = card.dataset.id;
+  const stars = loadStars();
+  if (stars.has(id)) {
+    stars.delete(id);
+    btn.textContent = '☆';
+    card.classList.remove('starred');
+  } else {
+    stars.add(id);
+    btn.textContent = '★';
+    card.classList.add('starred');
+  }
+  saveStars(stars);
+}
+
+// 페이지 로드 시 저장된 별표 복원
+window.addEventListener('DOMContentLoaded', () => {
+  const stars = loadStars();
+  document.querySelectorAll('.card').forEach(card => {
+    if (stars.has(card.dataset.id)) {
+      card.classList.add('starred');
+      card.querySelector('.star').textContent = '★';
+    }
+  });
+  updateStarredList(stars);
+});
+</script>
+</body>
+</html>

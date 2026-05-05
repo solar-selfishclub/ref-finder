@@ -1,0 +1,86 @@
+# ref-finder · 새 컴퓨터에서 한 번에 설치하는 스크립트 (Windows)
+#
+# 이 파일이 자동으로 처리하는 것:
+#   1. Python 3.12 설치 (이미 있으면 건너뜀)
+#   2. pip 패키지 설치 (mcp, httpx, beautifulsoup4, python-dotenv)
+#   3. .env 파일 만들기 (.env.example 복사 → 사용자가 토큰 채우기)
+#   4. ~/refs 출력 폴더 생성
+#
+# 사용 (새 컴퓨터, ref-finder 폴더에서 PowerShell 열고):
+#   .\install.ps1
+
+$ErrorActionPreference = "Stop"
+
+function Write-Step([string]$msg) {
+    Write-Host "`n==> $msg" -ForegroundColor Cyan
+}
+
+function Test-Command([string]$name) {
+    try { Get-Command $name -ErrorAction Stop | Out-Null; return $true }
+    catch { return $false }
+}
+
+# ----------- 1. Python -----------
+Write-Step "1/4 Python 확인"
+$needsPython = -not (Test-Command "py") -and -not (Test-Command "python")
+
+# python.exe가 Microsoft Store stub인지 확인 (실제로 동작 안 함)
+if (-not $needsPython) {
+    try {
+        $ver = & py --version 2>$null
+        if (-not $ver -or $ver.Trim() -eq "Python") { $needsPython = $true }
+    } catch { $needsPython = $true }
+}
+
+if ($needsPython) {
+    Write-Host "  Python을 winget으로 설치합니다 (1~2분)…"
+    winget install --id Python.Python.3.12 --silent --accept-package-agreements --accept-source-agreements | Out-Null
+    # 새 PATH 반영
+    $env:PATH = [System.Environment]::GetEnvironmentVariable("PATH","User") + ";" + [System.Environment]::GetEnvironmentVariable("PATH","Machine")
+    Write-Host "  Python 설치 완료." -ForegroundColor Green
+} else {
+    Write-Host "  Python 이미 설치됨." -ForegroundColor Green
+}
+
+# ----------- 2. pip 패키지 -----------
+Write-Step "2/4 Python 패키지 설치 (mcp, httpx, beautifulsoup4, python-dotenv)"
+& py -m pip install --quiet --upgrade pip
+& py -m pip install --quiet mcp httpx beautifulsoup4 python-dotenv
+Write-Host "  패키지 설치 완료." -ForegroundColor Green
+
+# ----------- 3. .env -----------
+Write-Step "3/4 환경 설정 파일 (.env)"
+$here = $PSScriptRoot
+$envPath = Join-Path $here ".env"
+$exPath  = Join-Path $here ".env.example"
+if (-not (Test-Path $envPath)) {
+    if (Test-Path $exPath) {
+        Copy-Item $exPath $envPath
+        Write-Host "  .env 파일을 만들었습니다." -ForegroundColor Green
+        Write-Host "  ※ Pinterest 토큰을 쓰려면 메모장으로 .env 열고 PINTEREST_ACCESS_TOKEN= 뒤에 붙여넣으세요." -ForegroundColor Yellow
+        Write-Host "    (Pinterest 없이 filmvibes만 써도 동작합니다.)" -ForegroundColor Yellow
+    } else {
+        Write-Warning "  .env.example을 찾을 수 없음. 건너뜀."
+    }
+} else {
+    Write-Host "  .env 이미 있음, 그대로 둠." -ForegroundColor Green
+}
+
+# ----------- 4. 출력 폴더 -----------
+Write-Step "4/4 레퍼런스 출력 폴더 ($HOME\refs)"
+$refsDir = Join-Path $HOME "refs"
+if (-not (Test-Path $refsDir)) {
+    New-Item -ItemType Directory -Force -Path $refsDir | Out-Null
+    Write-Host "  $refsDir 폴더를 만들었습니다." -ForegroundColor Green
+} else {
+    Write-Host "  $refsDir 이미 있음." -ForegroundColor Green
+}
+
+# ----------- 끝 -----------
+Write-Host "`n=========================================" -ForegroundColor Green
+Write-Host "  설치 완료!" -ForegroundColor Green
+Write-Host "=========================================" -ForegroundColor Green
+Write-Host "`n사용법:`n"
+Write-Host "  py find_ref.py --open `"natural cosmetic minimal`"" -ForegroundColor White
+Write-Host "  py find_ref.py --open --project ad-X `"moody close-up`"" -ForegroundColor White
+Write-Host "`n자세한 설명은 README.md 참조.`n"
