@@ -20,12 +20,24 @@ description: AI 영상 크리에이터를 위한 레퍼런스 자동 수집 + AI
 - ✅ `rain, night, umbrella, woman, street`
 - ❌ `lonely, atmospheric` (shot.cafe 추상 태그 약함)
 
-**자주 쓰는 태그**:
-- 환경: rain, snow, fog, night, day, sunset, beach, forest, city, street, alley, bridge
-- 인물: woman, man, child, couple, crowd, silhouette, back+turned
-- 빛/색: neon, candle, fire, moonlight, blue, red, golden+hour
-- 도구: umbrella, car+interior, train, mirror, window
-- 분위기: silhouette, reflection, shadow
+**⚠️ 태그 컨벤션 (반드시 정확하게)**: shot.cafe는 두 가지를 혼용함.
+
+| 형태 | 사용 시 | 예시 |
+|---|---|---|
+| **하이픈** (`-`) | 사전적으로 한 단어로 쓰는 시네마토그래피 용어 | `two-shot`, `close-up`, `low-angle`, `high-angle`, `over-the-shoulder` |
+| **공백** (CLI에는 그대로) | 두 단어로 쓰는 일반 표현 | `wide shot`, `medium shot`, `establishing shot` |
+| **단일** | 환경·인물·소품 | `rain`, `night`, `umbrella`, `woman`, `street`, `neon` |
+
+**검증된 작동 태그**:
+- 시네마토그래피: `two-shot`, `close-up`, `low-angle`, `high-angle`, `over-the-shoulder`, `wide shot`, `medium shot`, `establishing shot`, `silhouette`, `reflection`
+- 환경: `rain`, `snow`, `fog`, `night`, `day`, `sunset`, `beach`, `forest`, `city`, `street`, `alley`, `bridge`
+- 인물: `woman`, `man`, `child`, `couple`, `crowd`
+- 빛/색: `neon`, `candle`, `fire`, `moonlight`, `blue`, `red`, `golden hour`
+- 도구: `umbrella`, `car interior`, `train`, `mirror`, `window`
+
+**작동 안 하는 (확인됨, 쓰지 말 것)**: `long-shot`, `eye-level`, `master-shot`, `extreme-close-up`, `medium-close-up`, `two-people`, `profile`, `standing`, `facing`
+
+확실하지 않으면 단일 태그부터 시도 후 결과 보고 조합.
 
 ### Step 2 — 후보 다운로드 (메인 Claude)
 

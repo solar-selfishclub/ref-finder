@@ -176,14 +176,27 @@ class ShotCafeAdapter:
             time.sleep(self.CRAWL_DELAY - elapsed)
         self._last_request_at = time.time()
 
-    def _fetch_tag(self, client: httpx.Client, tag_str: str) -> list[RefItem]:
-        """단일 태그 또는 콤마 1개 태그 페이지 가져오기."""
+    @staticmethod
+    def _encode_tag(tag: str) -> str:
+        """태그를 shot.cafe URL 컨벤션으로 변환.
+
+        규칙 (사용자/caller가 정확한 형태로 줘야 함, 우리는 공백만 인코딩):
+          - 하이픈(`-`)은 literal 하이픈으로 유지: 'two-shot' → 'two-shot'
+          - 공백은 '+'로 인코딩: 'wide shot' → 'wide+shot'
+          - 이미 '+'면 그대로
+        """
+        return tag.strip().lower().replace(" ", "+")
+
+    def _fetch_tag(self, client: httpx.Client, tag_str: str, page: int = 1) -> list[RefItem]:
+        """단일 태그(또는 콤마 1개) 페이지 가져오기. page>=1."""
         self._throttle()
         url = f"{self.BASE}/tag/{tag_str}"
+        params = {"page": page} if page > 1 else None
         try:
-            r = client.get(url, headers=self.HEADERS, timeout=20.0, follow_redirects=True)
+            r = client.get(url, headers=self.HEADERS, params=params,
+                           timeout=20.0, follow_redirects=True)
             if r.status_code != 200:
-                print(f"[shotcafe] {url} {r.status_code}", file=sys.stderr)
+                print(f"[shotcafe] {url} p{page} {r.status_code}", file=sys.stderr)
                 return []
         except httpx.HTTPError as e:
             print(f"[shotcafe] error fetching {url}: {e}", file=sys.stderr)
@@ -200,7 +213,6 @@ class ShotCafeAdapter:
             page_url = f"{self.BASE}/#{data_url}" if data_url else self.BASE
             img_tag = a.find("img")
             alt = (img_tag.get("alt") if img_tag else "") or ""
-            # alt 형식: "Still from <Movie> (year) that has been tagged with: <tags>"
             m = _re.match(r"Still from (.+?) that has been tagged with:\s*(.+)$", alt)
             if m:
                 movie_label = m.group(1).strip()
@@ -217,44 +229,65 @@ class ShotCafeAdapter:
             ))
         return items
 
-    def search(self, tags: list[str], limit: int = 12) -> list[RefItem]:
-        """
-        tags: 태그 리스트 (예: ["rain", "night", "two shot"])
-        - 1~2개: 단일 요청 (콤마로 결합)
-        - 3개+: 첫 두 개를 콤마로 + 나머지로 클라이언트 교집합 필터
+    def _fetch_paginated(self, client: httpx.Client, tag_str: str,
+                        target: int, max_pages: int = 5) -> list[RefItem]:
+        """target개 모일 때까지 페이지를 순회. 0건 페이지를 만나면 중단."""
+        all_items: list[RefItem] = []
+        for page in range(1, max_pages + 1):
+            page_items = self._fetch_tag(client, tag_str, page=page)
+            if not page_items:
+                break
+            all_items.extend(page_items)
+            if len(all_items) >= target:
+                break
+        return all_items
 
-        shot.cafe 컨벤션: 다어절 태그는 공백을 '-'(하이픈)으로 결합.
-        예: "two shot" → "two-shot", "car interior" → "car-interior"
+    def search(self, tags: list[str], limit: int = 15) -> list[RefItem]:
+        """
+        tags: 태그 리스트. caller가 정확한 형태로 전달해야 함.
+              - 하이픈 단어: 'two-shot', 'close-up', 'low-angle', 'over-the-shoulder'
+              - 공백 단어: 'wide shot', 'medium shot', 'establishing shot'
+              - 환경: 'rain', 'night', 'umbrella' 등 단어
+        limit: 최종 결과 수 상한.
         """
         if not tags:
             return []
-        # 사용자가 +나 공백으로 줘도 정규화: 공백/+ → 하이픈
-        tags_norm = [
-            t.strip().lower().replace("+", "-").replace(" ", "-")
-            for t in tags if t.strip()
-        ]
-        if not tags_norm:
+        tags_enc = [self._encode_tag(t) for t in tags if t.strip()]
+        if not tags_enc:
             return []
 
+        # 검수까지 고려하면 limit*2 확보 권장 (절반쯤 거절될 가능성)
+        target = limit * 2
+
         with httpx.Client(timeout=20.0, follow_redirects=True) as client:
-            # 첫 시도: 처음 2개 태그를 콤마로 (robots.txt 허용 범위)
-            primary = ",".join(tags_norm[:2])
-            pool = self._fetch_tag(client, primary)
-            extra_tags = [t.replace("+", " ") for t in tags_norm[2:]]
+            # 1차: 처음 2개 태그를 콤마로 결합 (robots.txt 허용)
+            primary = ",".join(tags_enc[:2])
+            pool = self._fetch_paginated(client, primary, target=target)
 
-            # 추가 태그가 있으면 클라이언트 측 교집합으로 필터
+            # 추가 태그가 있으면 클라이언트 측 교집합 필터
+            extra_tags = [t.replace("+", " ").lower() for t in tags_enc[2:]]
             if extra_tags and pool:
-                pool = [
-                    it for it in pool
-                    if all(any(extra in (t.lower()) for t in it.tags) for extra in extra_tags)
-                ]
+                filtered = []
+                for it in pool:
+                    item_tags_lower = [t.lower() for t in it.tags]
+                    if all(any(extra in t for t in item_tags_lower) for extra in extra_tags):
+                        filtered.append(it)
+                pool = filtered
 
-            # 결과가 너무 적으면 단일 태그로 폴백 (가장 첫 태그)
-            if len(pool) < 3 and len(tags_norm) >= 2:
-                fallback = self._fetch_tag(client, tags_norm[0])
-                # 중복 제거
+            # 폴백 1: 콤보가 빈약하면 첫 태그 단독으로 페이지 더 가져오기
+            if len(pool) < limit and len(tags_enc) >= 1:
+                fallback = self._fetch_paginated(client, tags_enc[0], target=target)
                 seen_urls = {it.image_url for it in pool}
                 for it in fallback:
+                    if it.image_url not in seen_urls:
+                        pool.append(it)
+                        seen_urls.add(it.image_url)
+
+            # 폴백 2: 두 번째 태그 단독도 시도 (다양성 확보)
+            if len(pool) < limit and len(tags_enc) >= 2:
+                fallback2 = self._fetch_paginated(client, tags_enc[1], target=target // 2)
+                seen_urls = {it.image_url for it in pool}
+                for it in fallback2:
                     if it.image_url not in seen_urls:
                         pool.append(it)
                         seen_urls.add(it.image_url)
