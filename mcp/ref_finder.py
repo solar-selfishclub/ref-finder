@@ -219,13 +219,20 @@ class ShotCafeAdapter:
 
     def search(self, tags: list[str], limit: int = 12) -> list[RefItem]:
         """
-        tags: 태그 리스트 (예: ["rain", "night", "umbrella"])
+        tags: 태그 리스트 (예: ["rain", "night", "two shot"])
         - 1~2개: 단일 요청 (콤마로 결합)
         - 3개+: 첫 두 개를 콤마로 + 나머지로 클라이언트 교집합 필터
+
+        shot.cafe 컨벤션: 다어절 태그는 공백을 '-'(하이픈)으로 결합.
+        예: "two shot" → "two-shot", "car interior" → "car-interior"
         """
         if not tags:
             return []
-        tags_norm = [t.strip().lower().replace(" ", "+") for t in tags if t.strip()]
+        # 사용자가 +나 공백으로 줘도 정규화: 공백/+ → 하이픈
+        tags_norm = [
+            t.strip().lower().replace("+", "-").replace(" ", "-")
+            for t in tags if t.strip()
+        ]
         if not tags_norm:
             return []
 
